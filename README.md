@@ -53,3 +53,6 @@ The following are contributors to this goal:
 
   [1]: http://www.ericzhang.me/dl/?file=EZBlocker.php
   [2]: http://www.ericzhang.me/projects/spotify-ad-blocker-ezblocker/
+  
+## Credits
+Icon made by [Chanut](https://www.flaticon.com/authors/chanut) from www.flaticon.com
