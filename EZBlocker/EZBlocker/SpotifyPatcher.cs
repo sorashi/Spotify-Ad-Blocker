@@ -10,19 +10,16 @@ namespace EZBlocker
 {
     class SpotifyPatcher
     {
+        private readonly string backupPath = "";
         private readonly string spotifyPath = Environment.GetEnvironmentVariable("APPDATA") + @"\Spotify\spotify.exe";
         private readonly string targetPath = Environment.GetEnvironmentVariable("APPDATA") + @"\Spotify\Apps\zlink.spa";
         private readonly string tmpPath = Environment.GetEnvironmentVariable("TMP") + @"\EZBlocker\";
-        private readonly string backupPath = "";
-
-        public SpotifyPatcher()
-        {
+        public SpotifyPatcher() {
             Directory.CreateDirectory(tmpPath);
             backupPath = tmpPath + "backup.spa";
         }
 
-        public bool Patch()
-        {
+        public bool Patch() {
             Dictionary<String, String> patches = new Dictionary<string, string>
             {
                 { "openProductUpgradePage", "openWebsite" },
@@ -33,8 +30,7 @@ namespace EZBlocker
             string worker = @"var sendEZB=function(e){var t=new XMLHttpRequest;t.open('GET','http://localhost:19691/'+e,!0),t.send()};self.addEventListener('message',function(e){sendEZB(e.data),setTimeout(function(){postMessage('ready')},300)},!1);";
 
             string workingDir = Path.Combine(tmpPath, new Random().Next(999, 9999).ToString());
-            try
-            {
+            try {
                 System.IO.Compression.ZipFile.ExtractToDirectory(targetPath, workingDir);
 
                 // Check if already patched
@@ -48,8 +44,7 @@ namespace EZBlocker
                 // Patch index
                 string patchFile = Path.Combine(workingDir, "index.html");
                 string contents = File.ReadAllText(patchFile, System.Text.Encoding.UTF8);
-                foreach (KeyValuePair<string, string> patch in patches)
-                {
+                foreach (KeyValuePair<string, string> patch in patches) {
                     contents = contents.Replace(patch.Key, patch.Value);
                 }
                 File.WriteAllText(patchFile, contents, System.Text.Encoding.UTF8);
@@ -62,8 +57,7 @@ namespace EZBlocker
 
                 Directory.Delete(workingDir, true);
             }
-            catch (Exception e)
-            {
+            catch (Exception e) {
                 Debug.WriteLine(e);
                 Directory.Delete(workingDir, true);
                 Restore();
@@ -71,13 +65,12 @@ namespace EZBlocker
             }
 
             // Restart Spotify if running
-            try
-            {
-                foreach (Process p in Process.GetProcessesByName("spotify"))
-                {
+            try {
+                foreach (Process p in Process.GetProcessesByName("spotify")) {
                     p.Kill();
                 }
-            } catch (Exception e) {
+            }
+            catch (Exception e) {
                 Debug.WriteLine(e);
             }
 
@@ -87,18 +80,42 @@ namespace EZBlocker
             return true;
         }
 
-        public bool Restore()
-        {
-            if (File.Exists(backupPath))
-            {
+        public bool Restore() {
+            if (File.Exists(backupPath)) {
                 File.Copy(backupPath, targetPath, true);
                 return true;
             }
             return false;
         }
 
-        private void ZipCompress(string outPathname, string folderName)
-        {
+        private void CompressFolder(string path, ZipOutputStream zipStream, int folderOffset) {
+            foreach (string filename in Directory.GetFiles(path)) {
+                FileInfo fi = new FileInfo(filename);
+
+                string entryName = filename.Substring(folderOffset); // Makes the name in zip based on the folder
+                entryName = ZipEntry.CleanName(entryName); // Removes drive from name and fixes slash direction
+                ZipEntry newEntry = new ZipEntry(entryName) {
+                    DateTime = fi.LastWriteTime, // Note the zip format stores 2 second granularity
+                    Size = fi.Length
+                };
+
+                zipStream.PutNextEntry(newEntry);
+
+                // Zip the file in buffered chunks
+                // the "using" will close the stream even if an exception occurs
+                byte[] buffer = new byte[4096];
+                using (FileStream streamReader = File.OpenRead(filename)) {
+                    StreamUtils.Copy(streamReader, zipStream, buffer);
+                }
+                zipStream.CloseEntry();
+            }
+            string[] folders = Directory.GetDirectories(path);
+            foreach (string folder in folders) {
+                CompressFolder(folder, zipStream, folderOffset);
+            }
+        }
+
+        private void ZipCompress(string outPathname, string folderName) {
             FileStream fsOut = File.Create(outPathname);
             ZipOutputStream zipStream = new ZipOutputStream(fsOut);
 
@@ -111,38 +128,6 @@ namespace EZBlocker
 
             zipStream.IsStreamOwner = true;
             zipStream.Close();
-        }
-
-        private void CompressFolder(string path, ZipOutputStream zipStream, int folderOffset)
-        {
-            foreach (string filename in Directory.GetFiles(path))
-            {
-                FileInfo fi = new FileInfo(filename);
-
-                string entryName = filename.Substring(folderOffset); // Makes the name in zip based on the folder
-                entryName = ZipEntry.CleanName(entryName); // Removes drive from name and fixes slash direction
-                ZipEntry newEntry = new ZipEntry(entryName)
-                {
-                    DateTime = fi.LastWriteTime, // Note the zip format stores 2 second granularity
-                    Size = fi.Length
-                };
-
-                zipStream.PutNextEntry(newEntry);
-
-                // Zip the file in buffered chunks
-                // the "using" will close the stream even if an exception occurs
-                byte[] buffer = new byte[4096];
-                using (FileStream streamReader = File.OpenRead(filename))
-                {
-                    StreamUtils.Copy(streamReader, zipStream, buffer);
-                }
-                zipStream.CloseEntry();
-            }
-            string[] folders = Directory.GetDirectories(path);
-            foreach (string folder in folders)
-            {
-                CompressFolder(folder, zipStream, folderOffset);
-            }
         }
     }
 }

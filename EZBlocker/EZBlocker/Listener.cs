@@ -5,14 +5,10 @@ namespace EZBlocker
 {
     class Listener
     {
-        HttpListener listener;
-        private bool enabled;
         private const string endpoint = "http://localhost:19691/";
-
-        public string Message { get; private set; } = "";
-
-        public Listener()
-        {
+        private bool enabled;
+        private readonly HttpListener listener;
+        public Listener() {
             listener = new HttpListener();
             listener.Prefixes.Add(endpoint);
             listener.Start();
@@ -20,29 +16,25 @@ namespace EZBlocker
             enabled = true;
         }
 
-        public void Listen()
-        {
-            while (enabled)
-            {
-                try
-                {
+        public string Message { get; private set; } = "";
+        public void Listen() {
+            while (enabled) {
+                try {
                     HttpListenerContext context = listener.GetContext();
                     Handle(context.Request, context.Response);
-                } catch (Exception) { }
+                }
+                catch (Exception) { }
             }
         }
 
-        public void Stop()
-        {
+        public void Stop() {
             enabled = false;
             listener.Stop();
         }
 
-        private void Handle(HttpListenerRequest request, HttpListenerResponse response)
-        {
+        private void Handle(HttpListenerRequest request, HttpListenerResponse response) {
             string path = request.Url.LocalPath.Substring(1);
-            if (!path.Equals(Message))
-            {
+            if (!path.Equals(Message)) {
                 Message = path;
             }
 

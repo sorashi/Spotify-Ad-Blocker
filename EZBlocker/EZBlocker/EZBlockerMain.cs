@@ -16,134 +16,62 @@ namespace EZBlocker
 {
     public partial class Main : Form
     {
-        private bool muted = false;
-        private string lastMessage = "";
-        private ToolTip artistTooltip = new ToolTip();
-
+        public const string website = @"https://www.ericzhang.me/projects/spotify-ad-blocker-ezblocker/";
+        private readonly string[] adHosts = { "pubads.g.doubleclick.net", "securepubads.g.doubleclick.net", "www.googletagservices.com", "gads.pubmatic.com", "ads.pubmatic.com", "tpc.googlesyndication.com", "pagead2.googlesyndication.com", "googleads.g.doubleclick.net" };
+        private readonly string hostsPath = Environment.GetEnvironmentVariable("WINDIR") + @"\System32\drivers\etc\hosts";
         private readonly string spotifyPath = Environment.GetEnvironmentVariable("APPDATA") + @"\Spotify\spotify.exe";
         private readonly string volumeMixerPath = Environment.GetEnvironmentVariable("WINDIR") + @"\System32\SndVol.exe";
-        private readonly string hostsPath = Environment.GetEnvironmentVariable("WINDIR") + @"\System32\drivers\etc\hosts";
-
-        private readonly string[] adHosts = { "pubads.g.doubleclick.net", "securepubads.g.doubleclick.net", "www.googletagservices.com", "gads.pubmatic.com", "ads.pubmatic.com", "tpc.googlesyndication.com", "pagead2.googlesyndication.com", "googleads.g.doubleclick.net" };
-
-        public const string website = @"https://www.ericzhang.me/projects/spotify-ad-blocker-ezblocker/";
-
         private Analytics a;
-        private DateTime lastRequest;
-        private string lastAction = "";
-        private SpotifyPatcher patcher;
-        private Listener listener;
+        private ToolTip artistTooltip = new ToolTip();
         private SpotifyHook hook;
-
-        public Main()
-        {
+        private string lastAction = "";
+        private string lastMessage = "";
+        private DateTime lastRequest;
+        private Listener listener;
+        private bool muted = false;
+        private SpotifyPatcher patcher;
+        public Main() {
             Thread.CurrentThread.CurrentUICulture = Thread.CurrentThread.CurrentCulture;
             InitializeComponent();
         }
 
-        /**
-         * Contains the logic for when to mute Spotify
-         **/
-        private void MainTimer_Tick(object sender, EventArgs e)
-        {
+        
+        [DllImport("shell32.dll")]
+        public static extern bool IsUserAnAdmin();
+
+        protected override void OnFormClosing(FormClosingEventArgs e) {
+            if (!MainTimer.Enabled) return; // Still setting up UI
+            if (!Properties.Settings.Default.UserEducated) {
+                var result = MessageBox.Show(Properties.strings.OnExitMessageBox, "EZBlocker",
+                                 MessageBoxButtons.YesNo,
+                                 MessageBoxIcon.Warning);
+
+                e.Cancel = (result == DialogResult.No);
+
+                if (result == DialogResult.Yes) {
+                    Properties.Settings.Default.UserEducated = true;
+                    Properties.Settings.Default.Save();
+                }
+            }
+        }
+
+        private void CheckPatch(bool launch) {
+            string currentVersion = FileVersionInfo.GetVersionInfo(spotifyPath).FileVersion;
+            if (!Properties.Settings.Default.LastPatched.Equals(currentVersion) || launch) // Always attempt to patch on launch
+            {
+                // MessageBox.Show("EZBlocker needs to modify Spotify.\r\n\r\nTo return to the original, right click the EZBlocker icon in your task tray and choose 'Remove Patch'.", "EZBlocker");
+                if (!patcher.Patch()) {
+                    MessageBox.Show(Properties.strings.PatchErrorMessageBox, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                else {
+                    Properties.Settings.Default.LastPatched = currentVersion;
+                    Properties.Settings.Default.Save();
+                }
+            }
+        }
+
+        private void CheckUpdate() {
             try {
-                if (hook.IsRunning())
-                {
-                    if (hook.IsAdPlaying())
-                    {
-                        if (MainTimer.Interval != 1000) MainTimer.Interval = 1000;
-                        if (!muted) Mute(true);
-                        if (!hook.IsPlaying())
-                        {
-                            AudioUtils.SendNextTrack(hook.Handle == IntPtr.Zero ? Handle : hook.Handle);
-                            Thread.Sleep(500);
-                        }
-
-                        string artist = hook.GetArtist();
-                        string message = Properties.strings.StatusMuting + " " + Truncate(artist);
-                        if (lastMessage != message)
-                        {
-                            lastMessage = message;
-                            StatusLabel.Text = message;
-                            artistTooltip.SetToolTip(StatusLabel, artist);
-                            LogAction("/mute/" + artist);
-                        }
-                    }
-                    else if (hook.IsPlaying() && !hook.WindowName.Equals("Spotify")) // Normal music
-                    {
-                        if (muted)
-                        {
-                            Thread.Sleep(500); // Give extra time for ad to change out
-                            Mute(false);
-                        }
-                        if (MainTimer.Interval != 400) MainTimer.Interval = 400;
-
-                        string artist = hook.GetArtist();
-                        string message = Properties.strings.StatusPlaying + " " + Truncate(artist);
-                        if (lastMessage != message)
-                        {
-                            lastMessage = message;
-                            StatusLabel.Text = message;
-                            artistTooltip.SetToolTip(StatusLabel, artist);
-                            LogAction("/play/" + artist);
-                        }
-                    }
-                    else if (hook.WindowName.Equals("Spotify"))
-                    {
-                        string message = Properties.strings.StatusPaused;
-                        if (lastMessage != message)
-                        {
-                            lastMessage = message;
-                            StatusLabel.Text = message;
-                            artistTooltip.SetToolTip(StatusLabel, "");
-                        }
-                    }
-                }
-                else
-                {
-                    if (MainTimer.Interval != 1000) MainTimer.Interval = 1000;
-                    string message = Properties.strings.StatusNotFound;
-                    if (lastMessage != message)
-                    {
-                        lastMessage = message;
-                        StatusLabel.Text = message;
-                        artistTooltip.SetToolTip(StatusLabel, "");
-                    };
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine(ex);
-            }
-        }
-       
-        /**
-         * Mutes/Unmutes Spotify.
-         
-         * i: false = unmute, true = mute
-         **/
-        private void Mute(bool mute)
-        {
-            AudioUtils.SetMute(hook.VolumeControl.Control, mute);
-            muted = AudioUtils.IsMuted(hook.VolumeControl.Control) != null ? (bool)AudioUtils.IsMuted(hook.VolumeControl.Control) : false;
-        }
-
-        private string Truncate(string name)
-        {
-            if (name.Length > 10)
-            {
-                return name.Substring(0, 10) + "...";
-            }
-            return name;
-        }
-
-        /**
-         * Checks if the current installation is the latest version. Prompts user if not.
-         **/
-        private void CheckUpdate()
-        {
-            try
-            {
                 WebClient w = new WebClient();
                 w.Headers.Add("user-agent", "EZBlocker " + Assembly.GetExecutingAssembly().GetName().Version.ToString() + " " + System.Environment.OSVersion);
                 string s = w.DownloadString("https://www.ericzhang.me/dl/?file=EZBlocker-version.txt");
@@ -151,40 +79,42 @@ namespace EZBlocker
                 int current = Convert.ToInt32(Assembly.GetExecutingAssembly().GetName().Version.ToString().Replace(".", ""));
                 if (latest <= current)
                     return;
-                if (MessageBox.Show(Properties.strings.UpgradeMessageBox, "EZBlocker", MessageBoxButtons.YesNo) == DialogResult.Yes)
-                {
+                if (MessageBox.Show(Properties.strings.UpgradeMessageBox, "EZBlocker", MessageBoxButtons.YesNo) == DialogResult.Yes) {
                     Process.Start(website);
                     Application.Exit();
                 }
             }
-            catch (Exception)
-            {
+            catch (Exception) {
                 MessageBox.Show(Properties.strings.UpgradeErrorMessageBox, "EZBlocker");
             }
         }
 
-        private void LogAction(string action)
-        {
+        private void exitToolStripMenuItem_Click(object sender, EventArgs e) {
+            Close();
+        }
+
+        private void Form_Resize(object sender, EventArgs e) {
+            if (this.WindowState == FormWindowState.Minimized) {
+                this.ShowInTaskbar = false;
+                this.FormBorderStyle = FormBorderStyle.FixedToolWindow;
+                Notify(Properties.strings.HiddenNotify);
+            }
+        }
+
+        private void Heartbeat_Tick(object sender, EventArgs e) {
+            if (DateTime.Now - lastRequest > TimeSpan.FromMinutes(5)) {
+                LogAction("/heartbeat");
+            }
+        }
+
+        private void LogAction(string action) {
             if (lastAction.Equals(action) && DateTime.Now - lastRequest < TimeSpan.FromMinutes(5)) return;
             Task.Run(() => a.LogAction(action));
             lastAction = action;
             lastRequest = DateTime.Now;
         }
 
-        /**
-         * Send a request every 5 minutes to keep session alive
-         **/
-        private void Heartbeat_Tick(object sender, EventArgs e)
-        {
-            if (DateTime.Now - lastRequest > TimeSpan.FromMinutes(5))
-            {
-                LogAction("/heartbeat");
-            }
-        }
-
-
-        private void Main_Load(object sender, EventArgs e)
-        {
+        private void Main_Load(object sender, EventArgs e) {
             if (Properties.Settings.Default.UpdateSettings) // If true, then first launch of latest EZBlocker
             {
                 Properties.Settings.Default.Upgrade();
@@ -193,27 +123,22 @@ namespace EZBlocker
             }
 
             // Start Spotify and give EZBlocker higher priority
-            try
-            {
-                if (Properties.Settings.Default.StartSpotify && File.Exists(spotifyPath) && Process.GetProcessesByName("spotify").Length < 1)
-                {
+            try {
+                if (Properties.Settings.Default.StartSpotify && File.Exists(spotifyPath) && Process.GetProcessesByName("spotify").Length < 1) {
                     Process.Start(spotifyPath);
                 }
                 Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.High; // Windows throttles down when minimized to task tray, so make sure EZBlocker runs smoothly
             }
-            catch (Exception) {}
+            catch (Exception) { }
 
             // Set up UI
-            if (File.Exists(hostsPath))
-            {
+            if (File.Exists(hostsPath)) {
                 string hostsFile = File.ReadAllText(hostsPath);
                 BlockBannersCheckbox.Checked = adHosts.All(host => hostsFile.Contains("0.0.0.0 " + host));
             }
             RegistryKey startupKey = Registry.CurrentUser.OpenSubKey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", true);
-            if (startupKey.GetValue("EZBlocker") != null)
-            {
-                if (startupKey.GetValue("EZBlocker").ToString() == "\"" + Application.ExecutablePath + "\"")
-                {
+            if (startupKey.GetValue("EZBlocker") != null) {
+                if (startupKey.GetValue("EZBlocker").ToString() == "\"" + Application.ExecutablePath + "\"") {
                     StartupCheckbox.Checked = true;
                     this.WindowState = FormWindowState.Minimized;
                 }
@@ -223,10 +148,9 @@ namespace EZBlocker
                 }
             }
             SpotifyCheckbox.Checked = Properties.Settings.Default.StartSpotify;
-            
+
             // Set up Analytics
-            if (String.IsNullOrEmpty(Properties.Settings.Default.CID))
-            {
+            if (String.IsNullOrEmpty(Properties.Settings.Default.CID)) {
                 Properties.Settings.Default.CID = Analytics.GenerateCID();
                 Properties.Settings.Default.Save();
             }
@@ -245,73 +169,111 @@ namespace EZBlocker
 
             Task.Run(() => CheckUpdate());
         }
+        /// <summary>
+        /// Contains the logic for when to mute/unmute spotify
+        /// </summary>
+        private void MainTimer_Tick(object sender, EventArgs e) {
+            try {
+                if (hook.IsRunning()) {
+                    if (hook.IsAdPlaying()) {
+                        if (MainTimer.Interval != 1000) MainTimer.Interval = 1000;
+                        if (!muted) Mute(true);
+                        if (!hook.IsPlaying()) {
+                            AudioUtils.SendNextTrack(hook.Handle == IntPtr.Zero ? Handle : hook.Handle);
+                            Thread.Sleep(500);
+                        }
 
-        private void CheckPatch(bool launch)
-        {
-            string currentVersion = FileVersionInfo.GetVersionInfo(spotifyPath).FileVersion;
-            if (!Properties.Settings.Default.LastPatched.Equals(currentVersion) || launch) // Always attempt to patch on launch
-            {
-                // MessageBox.Show("EZBlocker needs to modify Spotify.\r\n\r\nTo return to the original, right click the EZBlocker icon in your task tray and choose 'Remove Patch'.", "EZBlocker");
-                if (!patcher.Patch())
-                {
-                    MessageBox.Show(Properties.strings.PatchErrorMessageBox, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        string artist = hook.GetArtist();
+                        string message = Properties.strings.StatusMuting + " " + Truncate(artist);
+                        if (lastMessage != message) {
+                            lastMessage = message;
+                            StatusLabel.Text = message;
+                            artistTooltip.SetToolTip(StatusLabel, artist);
+                            LogAction("/mute/" + artist);
+                        }
+                    }
+                    else if (hook.IsPlaying() && !hook.WindowName.Equals("Spotify")) // Normal music
+                    {
+                        if (muted) {
+                            Thread.Sleep(500); // Give extra time for ad to change out
+                            Mute(false);
+                        }
+                        if (MainTimer.Interval != 400) MainTimer.Interval = 400;
+
+                        string artist = hook.GetArtist();
+                        string message = Properties.strings.StatusPlaying + " " + Truncate(artist);
+                        if (lastMessage != message) {
+                            lastMessage = message;
+                            StatusLabel.Text = message;
+                            artistTooltip.SetToolTip(StatusLabel, artist);
+                            LogAction("/play/" + artist);
+                        }
+                    }
+                    else if (hook.WindowName.Equals("Spotify")) {
+                        string message = Properties.strings.StatusPaused;
+                        if (lastMessage != message) {
+                            lastMessage = message;
+                            StatusLabel.Text = message;
+                            artistTooltip.SetToolTip(StatusLabel, "");
+                        }
+                    }
                 }
-                else
-                {
-                    Properties.Settings.Default.LastPatched = currentVersion;
-                    Properties.Settings.Default.Save();
+                else {
+                    if (MainTimer.Interval != 1000) MainTimer.Interval = 1000;
+                    string message = Properties.strings.StatusNotFound;
+                    if (lastMessage != message) {
+                        lastMessage = message;
+                        StatusLabel.Text = message;
+                        artistTooltip.SetToolTip(StatusLabel, "");
+                    };
                 }
+            }
+            catch (Exception ex) {
+                Debug.WriteLine(ex);
             }
         }
 
-        private void RestoreFromTray()
-        {
-            this.FormBorderStyle = FormBorderStyle.FixedSingle;
-            this.WindowState = FormWindowState.Normal;
-            this.ShowInTaskbar = true;
+        /// <summary>
+        /// Mutes/Unmutes Spotify
+        /// </summary>
+        /// <param name="mute">true to mute, false to unmute</param>
+        private void Mute(bool mute) {
+            AudioUtils.SetMute(hook.VolumeControl.Control, mute);
+            muted = AudioUtils.IsMuted(hook.VolumeControl.Control) != null ? (bool)AudioUtils.IsMuted(hook.VolumeControl.Control) : false;
         }
-        
-        private void Notify(String message)
-        {
+        private void Notify(String message) {
             NotifyIcon.ShowBalloonTip(5000, "EZBlocker", message, ToolTipIcon.None);
         }
 
-        private void NotifyIcon_MouseDoubleClick(object sender, MouseEventArgs e)
-        {
-            if (!this.ShowInTaskbar && e.Button == MouseButtons.Left)
-            {
+        private void NotifyIcon_BalloonTipClicked(object sender, EventArgs e) {
+            RestoreFromTray();
+        }
+
+        private void NotifyIcon_MouseDoubleClick(object sender, MouseEventArgs e) {
+            if (!this.ShowInTaskbar && e.Button == MouseButtons.Left) {
                 RestoreFromTray();
             }
         }
 
-        private void NotifyIcon_BalloonTipClicked(object sender, EventArgs e)
-        {
+        private void openToolStripMenuItem_Click(object sender, EventArgs e) {
             RestoreFromTray();
         }
 
-        private void Form_Resize(object sender, EventArgs e)
-        {
-            if (this.WindowState == FormWindowState.Minimized)
-            {
-                this.ShowInTaskbar = false;
-                this.FormBorderStyle = FormBorderStyle.FixedToolWindow;
-                Notify(Properties.strings.HiddenNotify);
-            }
+        private void RestoreFromTray() {
+            this.FormBorderStyle = FormBorderStyle.FixedSingle;
+            this.WindowState = FormWindowState.Normal;
+            this.ShowInTaskbar = true;
         }
 
-        private void SkipAdsCheckbox_Click(object sender, EventArgs e)
-        {
+        private void SkipAdsCheckbox_Click(object sender, EventArgs e) {
             if (!MainTimer.Enabled) return; // Still setting up UI
-            if (!IsUserAnAdmin())
-            {
+            if (!IsUserAnAdmin()) {
                 MessageBox.Show(Properties.strings.BlockBannersUAC, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 BlockBannersCheckbox.Checked = !BlockBannersCheckbox.Checked;
                 return;
             }
-            try
-            {
-                if (!File.Exists(hostsPath))
-                {
+            try {
+                if (!File.Exists(hostsPath)) {
                     File.Create(hostsPath).Close();
                 }
                 // Always clear hosts
@@ -319,13 +281,10 @@ namespace EZBlocker
                 text = text.Where(line => !adHosts.Contains(line.Replace("0.0.0.0 ", "")) && line.Length > 0).ToArray();
                 File.WriteAllLines(hostsPath, text);
 
-                if (BlockBannersCheckbox.Checked)
-                {
-                    using (StreamWriter sw = File.AppendText(hostsPath))
-                    {
+                if (BlockBannersCheckbox.Checked) {
+                    using (StreamWriter sw = File.AppendText(hostsPath)) {
                         sw.WriteLine();
-                        foreach (string host in adHosts)
-                        {
+                        foreach (string host in adHosts) {
                             sw.WriteLine("0.0.0.0 " + host);
                         }
                     }
@@ -333,107 +292,70 @@ namespace EZBlocker
                 MessageBox.Show(Properties.strings.BlockBannersRestart, "EZBlocker", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 LogAction("/settings/blockBanners/" + BlockBannersCheckbox.Checked.ToString());
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) {
                 Debug.WriteLine(ex);
             }
         }
 
-        private void StartupCheckbox_CheckedChanged(object sender, EventArgs e)
-        {
-            if (!MainTimer.Enabled) return; // Still setting up UI
-            RegistryKey startupKey = Registry.CurrentUser.OpenSubKey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", true);
-            if (StartupCheckbox.Checked)
-            {
-                startupKey.SetValue("EZBlocker", "\"" + Application.ExecutablePath + "\"");
-            }
-            else
-            {
-                startupKey.DeleteValue("EZBlocker");
-            }
-            LogAction("/settings/startup/" + StartupCheckbox.Checked.ToString());
-        }
-
-
-        private void SpotifyCheckbox_CheckedChanged(object sender, EventArgs e)
-        {
+        private void SpotifyCheckbox_CheckedChanged(object sender, EventArgs e) {
             if (!MainTimer.Enabled) return; // Still setting up UI
             Properties.Settings.Default.StartSpotify = SpotifyCheckbox.Checked;
             Properties.Settings.Default.Save();
             LogAction("/settings/startSpotify/" + SpotifyCheckbox.Checked.ToString());
         }
 
-        private void VolumeMixerButton_Click(object sender, EventArgs e)
-        {
-            try
-            {
+        private void StartupCheckbox_CheckedChanged(object sender, EventArgs e) {
+            if (!MainTimer.Enabled) return; // Still setting up UI
+            RegistryKey startupKey = Registry.CurrentUser.OpenSubKey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", true);
+            if (StartupCheckbox.Checked) {
+                startupKey.SetValue("EZBlocker", "\"" + Application.ExecutablePath + "\"");
+            }
+            else {
+                startupKey.DeleteValue("EZBlocker");
+            }
+            LogAction("/settings/startup/" + StartupCheckbox.Checked.ToString());
+        }
+
+        private string Truncate(string name) {
+            if (name.Length > 10) {
+                return name.Substring(0, 10) + "...";
+            }
+            return name;
+        }
+        /// <summary>
+        /// Checks if the current installation is the latest version. Prompts user if not. 
+        /// Send a request every 5 minutes to keep session alive
+        /// </summary>
+        private void undoPatchToolStripMenuItem_Click(object sender, EventArgs e) {
+            Properties.Settings.Default.LastPatched = "";
+            Properties.Settings.Default.Save();
+
+            if (patcher.Restore()) {
+                MessageBox.Show(Properties.strings.UndoPatchOKMessageBox, "EZBlocker");
+            }
+            else {
+                MessageBox.Show(Properties.strings.UndoPatchFailMessageBox, "EZBlocker");
+            }
+        }
+
+        private void VolumeMixerButton_Click(object sender, EventArgs e) {
+            try {
                 Process.Start(volumeMixerPath);
                 LogAction("/button/volumeMixer");
             }
-            catch (Exception)
-            {
+            catch (Exception) {
                 MessageBox.Show(Properties.strings.VolumeMixerOpenError, "EZBlocker");
             }
         }
 
-        private void WebsiteLink_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
-        {
+        private void WebsiteLink_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e) {
             MessageBox.Show(Properties.strings.ReportProblemMessageBox.Replace("{0}", Assembly.GetExecutingAssembly().GetName().Version.ToString()).Replace("{1}", FileVersionInfo.GetVersionInfo(spotifyPath).FileVersion), "EZBlocker");
             Clipboard.SetText(Properties.strings.ReportProblemClipboard.Replace("{0}", Assembly.GetExecutingAssembly().GetName().Version.ToString()).Replace("{1}", FileVersionInfo.GetVersionInfo(spotifyPath).FileVersion));
             Process.Start(website);
             LogAction("/button/website");
         }
-
-        private void openToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            RestoreFromTray();
-        }
-
-        private void exitToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            Close();
-        }
-
-        private void websiteToolStripMenuItem_Click(object sender, EventArgs e)
-        {
+        private void websiteToolStripMenuItem_Click(object sender, EventArgs e) {
             Process.Start(website);
         }
-
-        private void undoPatchToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            Properties.Settings.Default.LastPatched = "";
-            Properties.Settings.Default.Save();
-
-            if (patcher.Restore())
-            {
-                MessageBox.Show(Properties.strings.UndoPatchOKMessageBox, "EZBlocker");
-            }
-            else
-            {
-                MessageBox.Show(Properties.strings.UndoPatchFailMessageBox, "EZBlocker");
-            }
-        }
-
-        protected override void OnFormClosing(FormClosingEventArgs e)
-        {
-            if (!MainTimer.Enabled) return; // Still setting up UI
-            if (!Properties.Settings.Default.UserEducated)
-            {
-                var result = MessageBox.Show(Properties.strings.OnExitMessageBox, "EZBlocker",
-                                 MessageBoxButtons.YesNo,
-                                 MessageBoxIcon.Warning);
-
-                e.Cancel = (result == DialogResult.No);
-
-                if (result == DialogResult.Yes)
-                {
-                    Properties.Settings.Default.UserEducated = true;
-                    Properties.Settings.Default.Save();
-                }
-            }
-        }
-
-        [DllImport("shell32.dll")]
-        public static extern bool IsUserAnAdmin();
     }
 }

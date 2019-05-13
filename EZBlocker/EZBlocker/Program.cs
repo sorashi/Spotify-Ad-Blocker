@@ -15,23 +15,17 @@ namespace EZBlocker
         /// The main entry point for the application.
         /// </summary>
         [STAThread]
-        static void Main()
-        {
+        static void Main() {
             string mutexId = string.Format("Local\\{{{0}}}", appGuid); // unique id for local mutex
 
-            using (var mutex = new Mutex(false, mutexId))
-            {
-                if (mutex.WaitOne(TimeSpan.Zero))
-                {
+            using (var mutex = new Mutex(false, mutexId)) {
+                if (mutex.WaitOne(TimeSpan.Zero)) {
                     Application.EnableVisualStyles();
                     Application.SetCompatibleTextRenderingDefault(false);
                     Application.Run(new Main());
                     mutex.ReleaseMutex();
                 }
-                else // another instance is already running
-                {
-                    return;
-                }
+                else return; // another instance is already running
             }
         }
     }

@@ -8,15 +8,13 @@ namespace EZBlocker
 {
     class Analytics
     {
-        private const string url = "https://www.google-analytics.com/collect";
         private const string tid = "UA-42480515-3";
-
-        private readonly HttpClient client = new HttpClient();
+        private const string url = "https://www.google-analytics.com/collect";
         private readonly string cid;
+        private readonly HttpClient client = new HttpClient();
         private readonly string cm;
-        private readonly string ul;
         private readonly string cs;
-
+        private readonly string ul;
         public Analytics(string clientId, string version) {
             cid = clientId;
             cm = version;
@@ -24,22 +22,19 @@ namespace EZBlocker
             cs = Environment.OSVersion.ToString();
         }
 
-        public static string GenerateCID()
-        {
+        public static string GenerateCID() {
             return Guid.NewGuid().ToString();
         }
 
-        public async Task<bool> LogAction(string action)
-        { 
+        public async Task<bool> LogAction(string action) {
             // https://developers.google.com/analytics/devguides/collection/protocol/v1/devguide
-            if (!action.StartsWith("/"))
-            {
+            if (!action.StartsWith("/")) {
                 action = "/" + action;
             }
             var data = new Dictionary<string, string>
             {
                 { "v", "1" },
-                { "tid", "UA-42480515-3" },
+                { "tid", tid },
                 { "t", "pageview" },
                 { "cid", cid }, // client id
                 { "cm", cm }, // Campaign medium, EZBlocker version
