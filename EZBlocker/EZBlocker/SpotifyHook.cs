@@ -48,18 +48,19 @@ namespace EZBlocker
         }
 
         public bool IsAdPlaying() {
-            if (!WindowName.Equals("") && !WindowName.Equals("Drag") && IsPlaying()) {
-                if (WindowName.Equals("Spotify")) // Prevent user pausing Spotify from being detected as ad (PeakVolume needs time to adjust)
-                {
-                    Debug.WriteLine("Ad1: " + lastPeak.ToString() + " " + peak.ToString());
-                    return true;
-                }
-                else if (!WindowName.Contains(" - ")) {
-                    Debug.WriteLine("Ad2: " + lastPeak.ToString() + " " + peak.ToString());
-                    return true;
-                }
-            }
-            return false;
+            return IsPlaying() && !WindowName.Contains(" - ") && !string.IsNullOrWhiteSpace(WindowName) && !WindowName.Equals("Drag");
+            // if (!WindowName.Equals("") && !WindowName.Equals("Drag") && IsPlaying()) {
+            //     if (WindowName.Equals("Spotify")) // Prevent user pausing Spotify from being detected as ad (PeakVolume needs time to adjust)
+            //     {
+            //         Debug.WriteLine("Ad1: " + lastPeak.ToString() + " " + peak.ToString());
+            //         return true;
+            //     }
+            //     else if (!WindowName.Contains(" - ")) {
+            //         Debug.WriteLine("Ad2: " + lastPeak.ToString() + " " + peak.ToString());
+            //         return true;
+            //     }
+            // }
+            // return false;
         }
 
         public bool IsPlaying() {
